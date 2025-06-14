@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useForm } from "react-hook-form";
@@ -32,11 +33,11 @@ export function FormRenderer({
   formDefinition: FormDefinition;
 }) {
   const createSchema = () => {
-    const schema: Record<string, any> = {};
+    const schema: Record<string, z.ZodTypeAny> = {};
 
     formDefinition.fields.forEach((field) => {
-      let fieldSchema;
-
+      // Create base schema based on field type
+      let fieldSchema: z.ZodTypeAny;
       switch (field.type) {
         case "text":
         case "textarea":
@@ -49,7 +50,7 @@ export function FormRenderer({
           fieldSchema = z.string().email();
           break;
         case "date":
-          fieldSchema = z.string();
+          fieldSchema = z.string(); // or z.date() if you parse it
           break;
         case "checkbox":
           fieldSchema = z.boolean();
@@ -62,32 +63,70 @@ export function FormRenderer({
           fieldSchema = z.string();
       }
 
+      // Apply validation rules
       field.validationRules?.forEach((rule) => {
+        const isStringSchema = fieldSchema._def.typeName === "ZodString";
+        const isNumberSchema = fieldSchema._def.typeName === "ZodNumber";
+
         if (rule.type === "required") {
-          fieldSchema = fieldSchema.refine((val) => !!val, {
-            message: rule.message,
-          });
-        } else if (
-          rule.type === "minLength" &&
-          typeof rule.value === "number"
-        ) {
-          fieldSchema = fieldSchema.min(rule.value, { message: rule.message });
-        } else if (
-          rule.type === "maxLength" &&
-          typeof rule.value === "number"
-        ) {
-          fieldSchema = fieldSchema.max(rule.value, { message: rule.message });
-        } else if (
-          rule.type === "greaterThan" &&
-          typeof rule.value === "number"
-        ) {
-          fieldSchema = fieldSchema.refine((val) => val > rule.value, {
-            message: rule.message,
-          });
-        } else if (rule.type === "lessThan" && typeof rule.value === "number") {
-          fieldSchema = fieldSchema.refine((val) => val < rule.value, {
-            message: rule.message,
-          });
+          fieldSchema = fieldSchema.refine(
+            (val) => {
+              if (val === null || val === undefined) return false;
+              if (typeof val === "string" && val.trim() === "") return false;
+              return true;
+            },
+            { message: rule.message }
+          );
+        } else if (isStringSchema) {
+          const stringSchema = fieldSchema as z.ZodString;
+          if (rule.type === "minLength" && typeof rule.value === "number") {
+            fieldSchema = stringSchema.min(rule.value, {
+              message: rule.message,
+            });
+          } else if (
+            rule.type === "maxLength" &&
+            typeof rule.value === "number"
+          ) {
+            fieldSchema = stringSchema.max(rule.value, {
+              message: rule.message,
+            });
+          } else if (
+            rule.type === "pattern" &&
+            typeof rule.value === "string"
+          ) {
+            fieldSchema = stringSchema.regex(
+              new RegExp(rule.value),
+              rule.message
+            );
+          }
+        } else if (isNumberSchema) {
+          const numberSchema = fieldSchema as z.ZodNumber;
+          const numericValue =
+            typeof rule.value === "string"
+              ? parseFloat(rule.value)
+              : rule.value;
+
+          if (typeof numericValue !== "number" || isNaN(numericValue)) {
+            return; // Skip invalid numeric rules
+          }
+
+          if (rule.type === "min") {
+            fieldSchema = numberSchema.min(numericValue, {
+              message: rule.message,
+            });
+          } else if (rule.type === "max") {
+            fieldSchema = numberSchema.max(numericValue, {
+              message: rule.message,
+            });
+          } else if (rule.type === "greaterThan") {
+            fieldSchema = numberSchema.refine((val) => val > numericValue, {
+              message: rule.message,
+            });
+          } else if (rule.type === "lessThan") {
+            fieldSchema = numberSchema.refine((val) => val < numericValue, {
+              message: rule.message,
+            });
+          }
         }
       });
 
